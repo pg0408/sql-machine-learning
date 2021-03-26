@@ -8,10 +8,12 @@ COPY k_nearest FROM 'k_nearest.csv' CSV HEADER ;
 -- CTE to get labelled training data
 WITH training AS
   (SELECT
-      *
-   FROM
+      id,
+      POINT(x_loc, y_loc) as xy,
+      category
+  FROM
       k_nearest
-   WHERE
+  WHERE
       category IS NOT NULL
   ),
 
@@ -19,11 +21,11 @@ WITH training AS
 test AS
   (SELECT
       id,
-      x_loc,
-      y_loc
-   FROM
+      POINT(x_loc, y_loc) as xy,
+      category
+  FROM
       k_nearest
-   WHERE
+  WHERE
       category IS NULL
   ),
 
@@ -31,52 +33,43 @@ test AS
 distances AS
   (SELECT
       test.id,
-      test.x_loc,
-      test.y_loc,
-      category,
-      ((test.x_loc - training.x_loc)^2 + 
-         (test.y_loc - training.y_loc)^2)^0.5 AS dist,
+      training.category,
+      test.xy<->training.xy AS dist,
       ROW_NUMBER() OVER (
          PARTITION BY test.id
-         ORDER BY (
-            (test.x_loc - training.x_loc)^2 + 
-               (test.y_loc - training.y_loc)^2)^0.5
+         ORDER BY test.xy<->training.xy 
          ) AS row_no
-   FROM
+  FROM
       test
-   CROSS JOIN training
-   ORDER BY 1, 5 ASC
+  CROSS JOIN training
+  ORDER BY 1, 4 ASC
   ),
 
 -- count the 'votes' per label for each unlabelled point
 votes AS
   (SELECT
       id,
-      x_loc,
-      y_loc,
       category,
       count(*) AS votes
-   FROM distances
-   WHERE row_no <= {{K}}
-   GROUP BY 1,2,3,4
-   ORDER BY 1)
+  FROM distances
+  WHERE row_no <= {{K}}
+  GROUP BY 1,2
+  ORDER BY 1)
 
 -- query for the label with the most votes
 SELECT
-   v.id,
-   v.x_loc,
-   v.y_loc,
-   v.category
+  v.id,
+  v.category
 FROM
-   votes v
+  votes v
 JOIN
   (SELECT
       id,
       max(votes) AS max_votes
-   FROM
+  FROM
       votes
-   GROUP BY 1
-   ) mv 
+  GROUP BY 1
+  ) mv 
 ON v.id = mv.id
 AND v.votes = mv.max_votes
 ORDER BY 1 ASC ;
